@@ -18,38 +18,36 @@
 
 ## 데이터 연결
 
-1순위 데이터는 공공데이터포털의 `한국공항공사_실시간 항공기 운항정보 조회_GW`(데이터셋 `15158625`)입니다. 기존 한국공항공사 운항정보·상세 운항정보 API의 대체 통합 서비스이며, 서버 API Route에서 다음 GW를 호출합니다.
+공공데이터포털 데이터셋 `15158625`의 `한국공항공사_실시간 항공기 운항정보 조회_GW`를 1순위로 사용합니다.
 
 - Base URL: `https://apis.data.go.kr/B551178/flight-status`
 - FIDS 목록: `GET /info`
-- 대구공항 필터: `schAirCode=TAE`
+- 대구공항: `schAirCode=TAE`
 - 출발: `schIOType=O`
 - 도착: `schIOType=I`
-- 조회 시간: `0000` ~ `2359`
+- 시간범위: `schStTime=0000&schEdTime=2359`
 - 응답: `type=json`
 
-`/info`는 항공사, 편명, 출·도착 공항, 예정/변경시간, 게이트, 국내·국제선 구분과 상태를 제공합니다. 도착 수하물 수취대는 `/detail` 보강 대상으로 남겨둡니다.
+신규 통합 GW는 기존 실시간 운항정보 계열 API를 대체하며 `/depart`, `/arrival`, `/taxfree`, `/info`, `/detail` 기능을 제공합니다. FIDS는 공항 전체 목록을 직접 조회할 수 있는 `/info`를 사용합니다.
 
-공공데이터포털의 `한국공항공사_실시간 항공기 운항정보 검색_GW`(데이터셋 `15160195`)는 편명(`schFln`) 검색용 API이므로 공항 전체 FIDS 목록에는 사용하지 않습니다.
-
-GW 연결 실패 시 대구공항 공식 홈페이지 실시간 목록을 보조 소스로 시도하고, 두 소스가 모두 실패하면 데모 데이터로 전환합니다.
+실시간 GW 연결 실패 시 대구공항 공식 홈페이지 실시간 목록을 보조 소스로 시도합니다.
 
 - 공식 대구공항 출발: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=1&MENU_ID=100
 - 공식 대구공항 도착: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=2&MENU_ID=100
 
-## 공공데이터포털 설정
+별도 데이터셋 `15160195`의 `한국공항공사_실시간 항공기 운항정보 검색_GW`는 편명(`schFln`) 검색용이므로 공항 전체 FIDS 목록 소스로 사용하지 않습니다.
 
 Vercel에는 다음 환경변수를 설정합니다.
 
 ```env
 FIDS_DEMO_MODE=false
-KAC_API_KEY=공공데이터포털에서_발급받은_인증키
+KAC_API_KEY=공공데이터포털_15158625_활용신청에_연결된_인증키
 # KAC_HOMEPAGE_API_URL=대구공항_실시간_목록_URL
 ```
 
-`KAC_API_KEY`가 존재하더라도 데이터셋 `15158625`에 대한 활용신청이 되어 있지 않으면 GW가 HTTP 403을 반환할 수 있습니다. 이 데이터셋은 공공데이터포털에서 별도로 활용신청한 뒤 같은 인증키를 사용합니다.
+`KAC_API_KEY`는 공공데이터포털의 `15158625` 활용신청 시 선택한 서비스키와 동일해야 합니다. 기업회원은 활용신청 과정에서 `프로젝트 서비스키` 또는 `개인 서비스키`를 선택할 수 있으므로, 다른 신청에 연결된 키를 넣으면 GW가 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR (30)`을 반환할 수 있습니다.
 
-인증키는 인코딩 또는 디코딩 키 어느 형식으로 넣어도 서버에서 정규화합니다.
+인증키가 Encoding 형식이어도 Decoding 형식이어도 서버에서 한 번 정규화해 전달합니다. `KAC_FLIGHT_API_URL`은 사용하지 않습니다.
 
 ## 실행
 
@@ -62,7 +60,7 @@ npm run dev
 - 출발 API: http://localhost:3000/api/flights?mode=departures
 - 도착 API: http://localhost:3000/api/flights?mode=arrivals
 
-통합 GW 연결 성공 시 응답 `source`는 `kac_gw`, 홈페이지 보조 연결은 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
+신규 통합 GW 연결 성공 시 응답 `source`는 `kac_gw`, 홈페이지 보조 연결은 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
 
 ## 배포
 
@@ -70,9 +68,16 @@ Vercel에 GitHub 저장소를 연결하고 `KAC_API_KEY`를 Production과 Previe
 
 > `.env.local`과 실제 인증키는 GitHub에 올리지 않습니다.
 
+## 현재 점검 상태
+
+- 신규 통합 GW 명세와 `/info` 호출 파라미터 확인 완료
+- Preview에서 `KAC_API_KEY` 존재 및 Encoding 형태(100자) 확인
+- Encoding 원문 / Decoding 후 URL 인코딩 / 재인코딩 방식 모두 시험했으나 현재 GW가 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR (30)`을 반환
+- 따라서 URL·파라미터·인코딩 문제가 아니라 Vercel에 저장된 키와 `15158625` 활용신청에 연결된 서비스키가 동일한지, 활용신청 상태가 정상 완료되었는지 확인 필요
+
 ## 다음 단계
 
-1. 데이터셋 `15158625` 활용승인 후 Preview에서 실제 대구공항 운항편 검증
-2. `/detail`을 이용한 도착편 수하물 수취대 보강
-3. 대구공항 홈페이지 fallback 응답 변경 감시
+1. 공공데이터포털 `15158625` 활용신청 상세에서 선택된 서비스키와 Vercel `KAC_API_KEY` 일치 확인
+2. `/info`에서 실제 대구공항 운항편 반환 확인 후 PR merge 및 Production 배포
+3. 도착편 수하물 수취대가 필요하면 `/detail` 보조 결합 검토
 4. 기존 대구공항 자동 안내방송/TTS 상태 머신 연결
