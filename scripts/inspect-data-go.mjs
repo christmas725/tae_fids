@@ -9,46 +9,25 @@ const pageRes = await fetch(pageUrl, {
 if (!pageRes.ok) throw new Error(`data.go page ${pageRes.status}`);
 const page = await pageRes.text();
 
-console.log('[KAC SPEC] page status', pageRes.status, 'bytes', page.length);
-
 const swaggerMatch = page.match(/const\s+swaggerJson\s*=\s*`([\s\S]*?)`\s*;/);
 if (!swaggerMatch) throw new Error('embedded swaggerJson not found');
-
-const templateBody = swaggerMatch[1]
-  .replaceAll('`', '\\`')
-  .replaceAll('${', '\\${');
-const decodedSwaggerText = vm.runInNewContext('`' + templateBody + '`');
-const swagger = JSON.parse(decodedSwaggerText);
+const templateBody = swaggerMatch[1].replaceAll('`', '\\`').replaceAll('${', '\\${');
+const swagger = JSON.parse(vm.runInNewContext('`' + templateBody + '`'));
 
 console.log('[KAC SPEC] title', swagger?.info?.title);
 console.log('[KAC SPEC] host', swagger?.host);
 console.log('[KAC SPEC] basePath', swagger?.basePath || '');
 console.log('[KAC SPEC] schemes', JSON.stringify(swagger?.schemes || []));
+console.log('[KAC SPEC] top-level parameters', JSON.stringify(swagger?.parameters || {}));
+console.log('[KAC SPEC] securityDefinitions', JSON.stringify(swagger?.securityDefinitions || {}));
+console.log('[KAC SPEC] security', JSON.stringify(swagger?.security || []));
 
 for (const [path, methods] of Object.entries(swagger?.paths || {})) {
+  console.log(`\n[KAC SPEC] PATH ${path} parameters`, JSON.stringify(methods?.parameters || []));
   for (const [method, operation] of Object.entries(methods || {})) {
     if (!operation || typeof operation !== 'object' || method === 'parameters') continue;
-    console.log(`\n[KAC SPEC] ===== ${method.toUpperCase()} ${path} =====`);
+    console.log(`[KAC SPEC] ===== ${method.toUpperCase()} ${path} =====`);
     console.log('[KAC SPEC] summary', operation.summary || '');
-    console.log('[KAC SPEC] description', operation.description || '');
-    const params = (operation.parameters || []).map((p) => ({
-      name: p.name,
-      in: p.in,
-      required: Boolean(p.required),
-      type: p.type,
-      description: p.description,
-      default: p.default,
-      example: p['x-example'],
-    }));
-    console.log('[KAC SPEC] parameters', JSON.stringify(params));
-
-    const itemProps = operation?.responses?.['200']?.schema?.properties?.body?.properties?.items?.properties?.item?.properties;
-    if (itemProps) {
-      console.log('[KAC SPEC] item fields', JSON.stringify(Object.entries(itemProps).map(([name, spec]) => ({
-        name,
-        description: spec?.description || '',
-        type: spec?.type || '',
-      }))));
-    }
+    console.log('[KAC SPEC] parameters raw', JSON.stringify(operation.parameters || []));
   }
 }
