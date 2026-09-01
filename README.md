@@ -18,21 +18,22 @@
 
 ## 데이터 연결
 
-한국공항공사 대구공항 공식 출발·도착 페이지가 사용하는 실시간 목록을 서버 API Route에서 조회합니다.
+공공데이터포털의 한국공항공사 상세 운항정보(ODCloud)를 서버 API Route에서 1순위로 조회합니다. 이 응답은 공항·운항일자 기준 전체 편과 탑승구·수하물 수취대 필드를 제공하므로 FIDS 목록에 사용합니다. 연결 실패 시 대구공항 공식 홈페이지의 실시간 목록을 보조 소스로 시도합니다.
 
 - 공식 대구공항 출발: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=1&MENU_ID=100
 - 공식 대구공항 도착: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=2&MENU_ID=100
 
-공공데이터포털의 `한국공항공사_실시간 항공기 운항정보 검색_GW`는 편명(`schFln`)을 필수로 받는 개별 항공편 검색 API이므로, 공항 전체 FIDS 목록 소스로는 사용하지 않습니다. 현재 연동에는 API 키가 필요하지 않습니다.
+공공데이터포털의 신규 `한국공항공사_실시간 항공기 운항정보 검색_GW`는 편명(`schFln`)을 필수로 받는 개별 항공편 검색 API이므로, 공항 전체 FIDS 목록 소스로는 사용하지 않습니다.
 
-기본적으로 별도 환경변수 없이 실시간 연결되며, 필요할 때만 다음 값을 사용합니다.
+Vercel에는 다음 환경변수를 설정합니다.
 
 ```env
 FIDS_DEMO_MODE=false
+KAC_API_KEY=공공데이터포털에서_발급받은_인증키
 # KAC_HOMEPAGE_API_URL=대구공항_실시간_목록_URL
 ```
 
-`KAC_API_KEY`와 `KAC_FLIGHT_API_URL`은 현재 연동에서 사용하지 않으므로 Vercel에 남아 있어도 동작에 영향을 주지 않습니다.
+인증키는 인코딩 또는 디코딩 키 어느 형식으로 넣어도 서버에서 정규화합니다. `KAC_FLIGHT_API_URL`은 사용하지 않습니다.
 
 ## 실행
 
@@ -45,11 +46,11 @@ npm run dev
 - 출발 API: http://localhost:3000/api/flights?mode=departures
 - 도착 API: http://localhost:3000/api/flights?mode=arrivals
 
-실시간 연결 성공 시 응답 `source`는 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
+상세 운항 API 연결 성공 시 응답 `source`는 `kac_odcloud`, 홈페이지 보조 연결은 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
 
 ## 배포
 
-Vercel에 GitHub 저장소를 연결하면 별도의 인증키 없이 배포할 수 있습니다. `FIDS_DEMO_MODE`는 `false` 또는 미설정 상태로 두고, API Route는 서울 리전(`icn1`)을 우선 사용합니다.
+Vercel에 GitHub 저장소를 연결하고 `KAC_API_KEY`를 Production과 Preview 환경에 등록합니다. `FIDS_DEMO_MODE`는 `false` 또는 미설정 상태로 두고, API Route는 서울 리전(`icn1`)을 우선 사용합니다.
 
 > `.env.local`과 실제 인증키는 GitHub에 올리지 않습니다.
 
