@@ -7,7 +7,8 @@ export const runtime = "edge";
 export const preferredRegion = "icn1";
 
 const AIRPORT_CODE = "TAE" as const;
-const DEFAULT_ENDPOINT = "https://www.airport.co.kr/daegu/ajaxf/frPryInfoSvc/getPryInfoList.do";
+const ODCLOUD_ENDPOINT = "https://api.odcloud.kr/api/FlightStatusListDTL/v1/getFlightStatusListDetail";
+const HOMEPAGE_ENDPOINT = "https://www.airport.co.kr/daegu/ajaxf/frPryInfoSvc/getPryInfoList.do";
 const REFERER = "https://www.airport.co.kr/daegu/cms/frCon/index.do?MENU_ID=100";
 const CACHE_SECONDS = 45;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -112,12 +113,46 @@ function normalizeHomepageFlight(raw: RawKacFlight, mode: FlightMode, index: num
   };
 }
 
+function normalizeOdcloudFlight(raw: RawKacFlight, mode: FlightMode, index: number, date: string): FidsFlight {
+  const departure = mode === "departures";
+  const scheduleRaw = first(raw, ["STD", "std"]);
+  const estimatedRaw = first(raw, ["ETD", "etd"], scheduleRaw);
+  const flightId = first(raw, ["AIR_FLN", "airFln"], "-").replace(/\s+/g, "");
+  const remark = first(raw, ["RMK_KOR", "rmkKor"]);
+  const operationDate = first(raw, ["FLIGHT_DATE", "flightDate"], date).replace(/\D/g, "").slice(0, 8) || date;
+
+  return {
+    id: `${operationDate}-${mode}-${flightId}-${scheduleRaw}-${index}`,
+    mode,
+    flightId,
+    masterFlightId: first(raw, ["MASTER_FLN", "masterFln"]),
+    airline: first(raw, ["AIRLINE_KOREAN", "airlineKorean"], "-"),
+    airlineEnglish: first(raw, ["AIRLINE_ENGLISH", "airlineEnglish"]),
+    airport: departure
+      ? first(raw, ["ARRIVED_KOR", "arrivedKor"], "-")
+      : first(raw, ["BOARDING_KOR", "boardingKor"], "-"),
+    airportEnglish: departure
+      ? first(raw, ["ARRIVED_ENG", "arrivedEng"])
+      : first(raw, ["BOARDING_ENG", "boardingEng"]),
+    airportCode: first(raw, ["CITY", "city"], "").toUpperCase(),
+    scheduleDateTime: fullDateTime(scheduleRaw, operationDate),
+    estimatedDateTime: fullDateTime(estimatedRaw, operationDate, scheduleRaw) || fullDateTime(scheduleRaw, operationDate),
+    actualDateTime: isCompleteStatus(remark) ? fullDateTime(estimatedRaw, operationDate, scheduleRaw) : "",
+    facility: departure ? first(raw, ["GATE", "gate"], "-") : first(raw, ["BAGGAGE_CLAIM", "baggageClaim"], "-"),
+    facilityLabel: departure ? "탑승구" : "수하물",
+    flightType: normalizeType(first(raw, ["LINE", "LINE_CODE", "line"])),
+    remark,
+    remarkEnglish: first(raw, ["RMK_ENG", "rmkEng"]),
+    codeshare: first(raw, ["CDSR_YN", "codeshare"]),
+  };
+}
+
 function sortEpoch(value: string) {
   return Number(value.replace(/\D/g, "").slice(0, 12)) || Number.MAX_SAFE_INTEGER;
 }
 
 async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: string) {
-  const endpoint = process.env.KAC_HOMEPAGE_API_URL?.trim() || DEFAULT_ENDPOINT;
+  const endpoint = process.env.KAC_HOMEPAGE_API_URL?.trim() || HOMEPAGE_ENDPOINT;
   const body = new URLSearchParams({
     pInoutGbn: mode === "departures" ? "O" : "I",
     pAirport: AIRPORT_CODE,
@@ -169,6 +204,61 @@ async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: st
     .sort((a, b) => sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) || a.flightId.localeCompare(b.flightId));
 }
 
+function cleanApiKey(value: string) {
+  const trimmed = value.trim();
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function safeUpstreamMessage(value: string, apiKey: string) {
+  return value.replaceAll(apiKey, "<redacted>").replace(/\s+/g, " ").slice(0, 180);
+}
+
+async function fetchOdcloudFlights(mode: FlightMode, date: string) {
+  const configuredKey = process.env.KAC_API_KEY;
+  if (!configuredKey?.trim()) throw new Error("KAC_API_KEY가 설정되지 않았습니다.");
+
+  const apiKey = cleanApiKey(configuredKey);
+  const endpoint = new URL(ODCLOUD_ENDPOINT);
+  endpoint.searchParams.set("page", "1");
+  endpoint.searchParams.set("perPage", "1000");
+  endpoint.searchParams.set("returnType", "JSON");
+  endpoint.searchParams.set("cond[FLIGHT_DATE::EQ]", date);
+  endpoint.searchParams.set("cond[AIRPORT::EQ]", AIRPORT_CODE);
+  endpoint.searchParams.set("serviceKey", apiKey);
+
+  const response = await fetch(endpoint, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const responseBody = await response.text();
+  if (!response.ok) {
+    throw new Error(`ODCloud 상세 운항 API ${response.status}: ${safeUpstreamMessage(responseBody, apiKey)}`);
+  }
+
+  let json: any;
+  try {
+    json = JSON.parse(responseBody);
+  } catch {
+    throw new Error(`ODCloud 상세 운항 API가 JSON이 아닌 응답을 반환했습니다: ${safeUpstreamMessage(responseBody, apiKey)}`);
+  }
+
+  if (!Array.isArray(json?.data)) {
+    throw new Error(`ODCloud 상세 운항 API 오류: ${safeUpstreamMessage(text(json?.message, "응답 형식 오류"), apiKey)}`);
+  }
+
+  const expectedIo = mode === "departures" ? "O" : "I";
+  return (json.data as RawKacFlight[])
+    .filter((raw) => first(raw, ["IO", "io"]).toUpperCase() === expectedIo)
+    .map((raw, index) => normalizeOdcloudFlight(raw, mode, index, date))
+    .filter((flight) => flight.flightId !== "-" && flight.scheduleDateTime)
+    .sort((a, b) => sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) || a.flightId.localeCompare(b.flightId));
+}
+
 function payload(mode: FlightMode, flights: FidsFlight[], source: FlightsPayload["source"], warning?: string): FlightsPayload {
   const { date } = kstParts();
   return {
@@ -176,7 +266,12 @@ function payload(mode: FlightMode, flights: FidsFlight[], source: FlightsPayload
     mode,
     updatedAt: new Date().toISOString(),
     source,
-    dataSources: source === "kac_homepage" ? ["kac-daegu-homepage"] : ["demo"],
+    dataSources:
+      source === "kac_odcloud"
+        ? ["kac-flight-status-detail-odcloud"]
+        : source === "kac_homepage"
+          ? ["kac-daegu-homepage"]
+          : ["demo"],
     query: { airportCode: AIRPORT_CODE, airportName: "대구", searchDate: date, searchFrom: "0000", searchTo: "2359" },
     warning,
   };
@@ -190,16 +285,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(payload(mode, demoFlights(mode), "demo", "FIDS_DEMO_MODE가 활성화되어 데모 운항편을 표시합니다."));
   }
 
+  const liveErrors: string[] = [];
+
+  try {
+    const flights = await fetchOdcloudFlights(mode, date);
+    if (!flights.length) throw new Error("대구공항 운항편이 0건으로 반환되었습니다.");
+    return NextResponse.json(payload(mode, flights, "kac_odcloud"), {
+      headers: { "Cache-Control": `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=30` },
+    });
+  } catch (error) {
+    liveErrors.push(error instanceof Error ? error.message : "ODCloud Unknown error");
+  }
+
   try {
     const flights = await fetchHomepageFlights(mode, date, formDate);
-    if (!flights.length) throw new Error("대구공항 운항편이 0건으로 반환되었습니다.");
+    if (!flights.length) throw new Error("대구공항 홈페이지 운항편이 0건으로 반환되었습니다.");
     return NextResponse.json(payload(mode, flights, "kac_homepage"), {
       headers: { "Cache-Control": `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=30` },
     });
   } catch (error) {
-    console.error("[TAE FIDS] 대구공항 실시간 목록 조회 실패", error);
+    liveErrors.push(error instanceof Error ? error.message : "Homepage Unknown error");
+    console.error("[TAE FIDS] 대구공항 실시간 목록 조회 실패", liveErrors.join(" / "));
     return NextResponse.json(
-      payload(mode, demoFlights(mode), "demo", `실시간 연결 실패: ${error instanceof Error ? error.message : "Unknown error"}`),
+      payload(mode, demoFlights(mode), "demo", `실시간 연결 실패: ${liveErrors.join(" / ")}`),
       { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   }
