@@ -27,14 +27,19 @@ export type FlightsPayload = {
   flights: FidsFlight[];
   mode: FlightMode;
   updatedAt: string;
-  source: "kac_gw" | "kac_homepage" | "demo";
+  source: "kac_odcloud" | "kac_gw" | "kac_homepage" | "demo";
   dataSources: string[];
-  query: {
-    airportCode: "TAE";
-    airportName: "대구";
-    searchDate: string;
-    searchFrom: string;
-    searchTo: string;
-  };
+  query:
+    | {
+        airportCode: "TAE";
+        airportName: "대구";
+        searchDate: string;
+        searchFrom: string;
+        searchTo: string;
+      }
+    | {
+        airport: "TAE";
+        date: string;
+      };
   warning?: string;
 };

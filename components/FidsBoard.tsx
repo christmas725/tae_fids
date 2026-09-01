@@ -217,7 +217,10 @@ export default function FidsBoard() {
   const blanks = Array.from({ length: Math.max(0, PAGE_SIZE - rows.length) });
   const departure = mode === "departures";
   const currentPayload = payload?.mode === mode ? payload : null;
-  const connected = currentPayload?.source === "kac_homepage" || currentPayload?.source === "kac_gw";
+  const connected =
+    currentPayload?.source === "kac_odcloud" ||
+    currentPayload?.source === "kac_homepage" ||
+    currentPayload?.source === "kac_gw";
 
   return (
     <main className="screen-shell">
