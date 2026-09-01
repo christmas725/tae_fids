@@ -217,6 +217,7 @@ export default function FidsBoard() {
   const blanks = Array.from({ length: Math.max(0, PAGE_SIZE - rows.length) });
   const departure = mode === "departures";
   const currentPayload = payload?.mode === mode ? payload : null;
+  const connected = currentPayload?.source === "kac_homepage" || currentPayload?.source === "kac_gw";
 
   return (
     <main className="screen-shell">
@@ -256,8 +257,8 @@ export default function FidsBoard() {
           </div>
 
           <footer className="data-strip">
-            <span className={`live-dot ${currentPayload?.source === "kac_gw" ? "connected" : "demo"}`} />
-            <strong>{currentPayload?.source === "kac_gw" ? "KAC 실시간 연결" : "데모 데이터"}</strong>
+            <span className={`live-dot ${connected ? "connected" : "demo"}`} />
+            <strong>{connected ? "KAC 실시간 연결" : "데모 데이터"}</strong>
             <span>{currentPayload?.warning || error || "60초마다 자동 갱신"}</span>
             <span className="language-indicator">{language === "KO" ? "한국어" : language === "EN" ? "ENGLISH" : "LOCAL"}</span>
           </footer>
