@@ -18,12 +18,26 @@
 
 ## 데이터 연결
 
-공공데이터포털의 한국공항공사 상세 운항정보(ODCloud)를 서버 API Route에서 1순위로 조회합니다. 이 응답은 공항·운항일자 기준 전체 편과 탑승구·수하물 수취대 필드를 제공하므로 FIDS 목록에 사용합니다. 연결 실패 시 대구공항 공식 홈페이지의 실시간 목록을 보조 소스로 시도합니다.
+1순위 데이터는 공공데이터포털의 `한국공항공사_실시간 항공기 운항정보 조회_GW`(데이터셋 `15158625`)입니다. 기존 한국공항공사 운항정보·상세 운항정보 API의 대체 통합 서비스이며, 서버 API Route에서 다음 GW를 호출합니다.
+
+- Base URL: `https://apis.data.go.kr/B551178/flight-status`
+- FIDS 목록: `GET /info`
+- 대구공항 필터: `schAirCode=TAE`
+- 출발: `schIOType=O`
+- 도착: `schIOType=I`
+- 조회 시간: `0000` ~ `2359`
+- 응답: `type=json`
+
+`/info`는 항공사, 편명, 출·도착 공항, 예정/변경시간, 게이트, 국내·국제선 구분과 상태를 제공합니다. 도착 수하물 수취대는 `/detail` 보강 대상으로 남겨둡니다.
+
+공공데이터포털의 `한국공항공사_실시간 항공기 운항정보 검색_GW`(데이터셋 `15160195`)는 편명(`schFln`) 검색용 API이므로 공항 전체 FIDS 목록에는 사용하지 않습니다.
+
+GW 연결 실패 시 대구공항 공식 홈페이지 실시간 목록을 보조 소스로 시도하고, 두 소스가 모두 실패하면 데모 데이터로 전환합니다.
 
 - 공식 대구공항 출발: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=1&MENU_ID=100
 - 공식 대구공항 도착: https://www.airport.co.kr/daegu/cms/frCon/index.do?CONTENTS_NO=2&MENU_ID=100
 
-공공데이터포털의 신규 `한국공항공사_실시간 항공기 운항정보 검색_GW`는 편명(`schFln`)을 필수로 받는 개별 항공편 검색 API이므로, 공항 전체 FIDS 목록 소스로는 사용하지 않습니다.
+## 공공데이터포털 설정
 
 Vercel에는 다음 환경변수를 설정합니다.
 
@@ -33,7 +47,9 @@ KAC_API_KEY=공공데이터포털에서_발급받은_인증키
 # KAC_HOMEPAGE_API_URL=대구공항_실시간_목록_URL
 ```
 
-인증키는 인코딩 또는 디코딩 키 어느 형식으로 넣어도 서버에서 정규화합니다. `KAC_FLIGHT_API_URL`은 사용하지 않습니다.
+`KAC_API_KEY`가 존재하더라도 데이터셋 `15158625`에 대한 활용신청이 되어 있지 않으면 GW가 HTTP 403을 반환할 수 있습니다. 이 데이터셋은 공공데이터포털에서 별도로 활용신청한 뒤 같은 인증키를 사용합니다.
+
+인증키는 인코딩 또는 디코딩 키 어느 형식으로 넣어도 서버에서 정규화합니다.
 
 ## 실행
 
@@ -46,7 +62,7 @@ npm run dev
 - 출발 API: http://localhost:3000/api/flights?mode=departures
 - 도착 API: http://localhost:3000/api/flights?mode=arrivals
 
-상세 운항 API 연결 성공 시 응답 `source`는 `kac_odcloud`, 홈페이지 보조 연결은 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
+통합 GW 연결 성공 시 응답 `source`는 `kac_gw`, 홈페이지 보조 연결은 `kac_homepage`, 데모 또는 fallback은 `demo`입니다.
 
 ## 배포
 
@@ -56,6 +72,7 @@ Vercel에 GitHub 저장소를 연결하고 `KAC_API_KEY`를 Production과 Previe
 
 ## 다음 단계
 
-1. 도착편 수하물 수취대 데이터 보조 소스 검토
-2. 대구공항 홈페이지 응답 변경 감시 및 fallback 보강
-3. 기존 대구공항 자동 안내방송/TTS 상태 머신 연결
+1. 데이터셋 `15158625` 활용승인 후 Preview에서 실제 대구공항 운항편 검증
+2. `/detail`을 이용한 도착편 수하물 수취대 보강
+3. 대구공항 홈페이지 fallback 응답 변경 감시
+4. 기존 대구공항 자동 안내방송/TTS 상태 머신 연결
