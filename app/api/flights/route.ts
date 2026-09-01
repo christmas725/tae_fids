@@ -3,6 +3,7 @@ import { demoFlights } from "@/lib/demo";
 import type { FidsFlight, FlightMode, FlightsPayload, RawKacFlight } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 export const preferredRegion = "icn1";
 
 const AIRPORT_CODE = "TAE" as const;
@@ -134,8 +135,11 @@ async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: st
     method: "POST",
     headers: {
       Accept: "application/json",
+      "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      Origin: "https://www.airport.co.kr",
       Referer: REFERER,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
       "X-Requested-With": "XMLHttpRequest",
     },
     body,
@@ -150,7 +154,8 @@ async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: st
   try {
     json = JSON.parse(responseBody);
   } catch {
-    throw new Error("대구공항 홈페이지가 JSON이 아닌 응답을 반환했습니다.");
+    const contentType = response.headers.get("content-type") || "unknown";
+    throw new Error(`대구공항 홈페이지가 JSON이 아닌 응답을 반환했습니다. (${contentType}: ${responseBody.replace(/\s+/g, " ").slice(0, 100)})`);
   }
 
   const items = Array.isArray(json?.data?.list) ? (json.data.list as RawKacFlight[]) : [];
