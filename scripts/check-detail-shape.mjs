@@ -34,19 +34,37 @@ try {
   console.log(`[KAC detail check] status=${response.status}`);
   let json;
   try { json = JSON.parse(body); } catch {
-    console.log(`[KAC detail check] non-json=${body.replace(/\s+/g, " ").slice(0, 500)}`);
+    console.log(`[KAC detail check] non-json=${body.replace(/\s+/g, " ").slice(0, 1200)}`);
     process.exit(0);
   }
+
+  console.log(`[KAC detail check] topKeys=${Object.keys(json || {}).join(",")}`);
+  const compact = JSON.stringify(json).replaceAll(key, "<redacted>");
+  console.log(`[KAC detail check] bodyShape=${compact.slice(0, 5000)}`);
+
   const responseRoot = json?.response ?? json;
   const header = responseRoot?.header ?? json?.header ?? {};
   const payload = responseRoot?.body ?? json?.body ?? json;
-  const value = payload?.items?.item ?? payload?.items ?? json?.items?.item ?? json?.items ?? [];
+  const candidates = [
+    payload?.items?.item,
+    payload?.items,
+    payload?.data?.list,
+    payload?.data,
+    json?.items?.item,
+    json?.items,
+    json?.data?.list,
+    json?.data,
+    json?.response?.data?.list,
+    json?.response?.data,
+  ];
+  const value = candidates.find((candidate) => Array.isArray(candidate) || (candidate && typeof candidate === "object")) ?? [];
   const items = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
-  console.log(`[KAC detail check] resultCode=${header?.resultCode ?? ""} resultMsg=${header?.resultMsg ?? ""} totalCount=${payload?.totalCount ?? ""} returned=${items.length}`);
+  console.log(`[KAC detail check] resultCode=${header?.resultCode ?? ""} resultMsg=${header?.resultMsg ?? ""} totalCount=${payload?.totalCount ?? json?.totalCount ?? ""} returned=${items.length}`);
+
   if (items.length) {
     const keys = [...new Set(items.flatMap((item) => Object.keys(item || {})))].sort();
     console.log(`[KAC detail check] keys=${keys.join(",")}`);
-    const candidates = items.slice(0, 8).map((item) => ({
+    const samples = items.slice(0, 8).map((item) => ({
       flightId: item?.flightId ?? item?.flightid ?? item?.airFln ?? item?.AIR_FLN,
       masterFlightId: item?.masterFlightId ?? item?.masterflightid ?? item?.masterFlightid ?? item?.MASTER_FLN,
       codeshare: item?.codeshare ?? item?.codeShare ?? item?.CDSR_YN,
@@ -55,7 +73,7 @@ try {
       airline: item?.airline ?? item?.airlineKorean ?? item?.AIR_KOR,
       raw: item,
     }));
-    console.log(`[KAC detail check] samples=${JSON.stringify(candidates).slice(0, 7000)}`);
+    console.log(`[KAC detail check] samples=${JSON.stringify(samples).slice(0, 7000)}`);
   }
 } catch (error) {
   console.log(`[KAC detail check] request failed: ${error instanceof Error ? error.message : String(error)}`);
