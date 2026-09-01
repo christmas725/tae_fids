@@ -189,6 +189,8 @@ async function fetchGwInfoFlights(mode: FlightMode, date: string) {
   endpoint.searchParams.set("schIOType", mode === "departures" ? "O" : "I");
   endpoint.searchParams.set("schStTime", "0000");
   endpoint.searchParams.set("schEdTime", "2359");
+  endpoint.searchParams.set("pageNo", "1");
+  endpoint.searchParams.set("numOfRows", "100");
   endpoint.searchParams.set("type", "json");
 
   const response = await fetch(endpoint, {
