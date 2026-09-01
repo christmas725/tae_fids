@@ -26,6 +26,7 @@
 - 출발: `schIOType=O`
 - 도착: `schIOType=I`
 - 시간범위: `schStTime=0000&schEdTime=2359`
+- 페이지: `pageNo=1&numOfRows=100`
 - 응답: `type=json`
 
 신규 통합 GW는 기존 실시간 운항정보 계열 API를 대체하며 `/depart`, `/arrival`, `/taxfree`, `/info`, `/detail` 기능을 제공합니다. FIDS는 공항 전체 목록을 직접 조회할 수 있는 `/info`를 사용합니다.
@@ -71,14 +72,14 @@ Vercel에 GitHub 저장소를 연결하고 `KAC_API_KEY`를 Production과 Previe
 ## 현재 점검 상태
 
 - 신규 통합 GW 명세와 `/info` 호출 파라미터 확인 완료
-- Preview에서 `KAC_API_KEY` 존재 및 Encoding 형태(100자) 확인
-- Encoding 원문 / Decoding 후 URL 인코딩 / 재인코딩 방식 모두 시험했으나 현재 GW가 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR (30)`을 반환
-- 공공데이터포털 공식 에러 안내상 코드 30은 `등록되지 않은 API 인증키`이며, 인증키 정확성과 해당 서비스 활용신청 완료 여부를 확인해야 함
-- 서버는 앞으로 403을 임의의 권한 오류로 바꾸지 않고 GW 원문 인증 오류를 안전하게 표시함
+- 공공데이터포털 `15158625` 활용승인 후 Preview에서 인증 정상 확인
+- Preview 빌드에서 `HTTP 200 / resultCode=00 / NORMAL SERVICE` 확인
+- 대구공항 출발 `29/29`, 도착 `29/29` 전체 운항편 수신 확인
+- 기본 10건 제한을 피하기 위해 `pageNo=1&numOfRows=100` 적용
+- 진단용 임시 스크립트 제거 후 최종 Preview 빌드 정상 완료
 
 ## 다음 단계
 
-1. 공공데이터포털 `15158625` 활용신청 상세에서 선택된 서비스키와 Vercel `KAC_API_KEY` 일치 확인
-2. `/info`에서 실제 대구공항 운항편 반환 확인 후 PR merge 및 Production 배포
-3. 도착편 수하물 수취대가 필요하면 `/detail` 보조 결합 검토
-4. 기존 대구공항 자동 안내방송/TTS 상태 머신 연결
+1. 도착편 수하물 수취대가 필요하면 `/detail` 보조 결합 검토
+2. 대구공항 홈페이지 응답 변경 감시 및 fallback 보강
+3. 기존 대구공항 자동 안내방송/TTS 상태 머신 연결
