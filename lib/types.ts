@@ -29,12 +29,17 @@ export type FlightsPayload = {
   updatedAt: string;
   source: "kac_odcloud" | "kac_gw" | "kac_homepage" | "demo";
   dataSources: string[];
-  query: {
-    airportCode: "TAE";
-    airportName: "대구";
-    searchDate: string;
-    searchFrom: string;
-    searchTo: string;
-  };
+  query:
+    | {
+        airportCode: "TAE";
+        airportName: "대구";
+        searchDate: string;
+        searchFrom: string;
+        searchTo: string;
+      }
+    | {
+        airport: "TAE";
+        date: string;
+      };
   warning?: string;
 };
