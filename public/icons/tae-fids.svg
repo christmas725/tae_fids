@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">TAE FIDS</title>
+  <rect width="512" height="512" rx="92" fill="#155db0"/>
+  <rect x="52" y="52" width="408" height="408" rx="52" fill="#080b10" stroke="#fff" stroke-width="6"/>
+  <path d="M132 250 256 126m0 0v70m0-70h-70" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="square" stroke-linejoin="miter"/>
+  <text x="256" y="336" fill="#fff" font-family="Arial, sans-serif" font-size="112" font-weight="800" text-anchor="middle">TAE</text>
+  <text x="256" y="402" fill="#c7d8ec" font-family="Arial, sans-serif" font-size="42" font-weight="800" letter-spacing="4" text-anchor="middle">FIDS</text>
+</svg>
