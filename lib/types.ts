@@ -27,7 +27,7 @@ export type FlightsPayload = {
   flights: FidsFlight[];
   mode: FlightMode;
   updatedAt: string;
-  source: "kac_gw" | "kac_homepage" | "demo";
+  source: "kac_odcloud" | "kac_gw" | "kac_homepage" | "demo";
   dataSources: string[];
   query: {
     airportCode: "TAE";
