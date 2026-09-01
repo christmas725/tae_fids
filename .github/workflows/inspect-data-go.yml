@@ -1,0 +1,66 @@
+name: Inspect data.go.kr KAC API spec
+
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-data-go.yml'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch dynamic API specification
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import html
+          import re
+          import urllib.parse
+          import urllib.request
+
+          list_id = "15158625"
+          page_url = f"https://www.data.go.kr/data/{list_id}/openapi.do"
+          req = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req, timeout=30) as r:
+              page = r.read().decode("utf-8", errors="replace")
+
+          m = re.search(r'name=["\']publicDataDetailPk["\'][^>]*value=["\']([^"\']+)', page, re.I | re.S)
+          if not m:
+              m = re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']publicDataDetailPk["\']', page, re.I | re.S)
+          if not m:
+              raise SystemExit("publicDataDetailPk not found")
+          detail_pk = html.unescape(m.group(1))
+          print("publicDataDetailPk:", detail_pk)
+
+          select = re.search(r'<select[^>]*id=["\']open_api_detail_select["\'][^>]*>(.*?)</select>', page, re.I | re.S)
+          if not select:
+              raise SystemExit("operation select not found")
+          options = re.findall(r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>(.*?)</option>', select.group(1), re.I | re.S)
+          options = [(html.unescape(v).strip(), re.sub(r'<[^>]+>', '', html.unescape(label)).strip()) for v, label in options if v.strip()]
+          print("operations:", options)
+
+          ajax_url = "https://www.data.go.kr/tcs/dss/selectApiDetailFunction.do"
+          for seq, label in options:
+              body = urllib.parse.urlencode({
+                  "oprtinSeqNo": seq,
+                  "publicDataDetailPk": detail_pk,
+                  "publicDataPk": list_id,
+              }).encode()
+              req = urllib.request.Request(
+                  ajax_url,
+                  data=body,
+                  headers={
+                      "User-Agent": "Mozilla/5.0",
+                      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  detail = r.read().decode("utf-8", errors="replace")
+              text = re.sub(r'(?is)<script.*?</script>|<style.*?</style>', '', detail)
+              text = re.sub(r'(?s)<[^>]+>', '\n', text)
+              text = html.unescape(text)
+              text = '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+              print("\n===== OPERATION", seq, label, "=====")
+              print(text[:30000])
+          PY
