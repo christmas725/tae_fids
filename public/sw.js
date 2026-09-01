@@ -1,6 +1,6 @@
-const CACHE_NAME = "tae-fids-v0.1-shell-v1";
+const CACHE_NAME = "tae-fids-v0.1-shell-v2";
 const OFFLINE_URL = "/offline.html";
-const PRECACHE = [OFFLINE_URL, "/icons/tae-fids.svg"];
+const PRECACHE = [OFFLINE_URL, "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
