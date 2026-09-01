@@ -15,6 +15,7 @@
 
   .screen-shell {
     width: 100%;
+    min-width: 0;
     height: 100dvh;
     min-height: 0;
     overflow: hidden;
@@ -22,6 +23,7 @@
 
   .fids-frame {
     width: 100%;
+    min-width: 0;
     height: 100%;
     min-height: 0;
     grid-template-columns: 1fr;
@@ -93,8 +95,10 @@
   .rail-time strong { font-size: 19px; }
   .rail-time span { margin-top: 3px; font-size: 7px; white-space: nowrap; }
 
-  .information-panel { height: 100%; min-height: 0; overflow: hidden; }
+  .information-panel { width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; }
   .row-grid {
+    width: 100%;
+    min-width: 0;
     grid-template-columns: minmax(45px,.76fr) minmax(58px,1fr) minmax(86px,1.55fr) minmax(40px,.62fr) minmax(54px,.92fr);
   }
   .row-grid > div:nth-child(4) { display: none; }
