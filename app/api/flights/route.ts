@@ -3,15 +3,27 @@ import { demoFlights } from "@/lib/demo";
 import type { FidsFlight, FlightMode, FlightsPayload, RawKacFlight } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const preferredRegion = "icn1";
 
 const AIRPORT_CODE = "TAE" as const;
 const KAC_GW_BASE = "https://apis.data.go.kr/B551178/flight-status";
 const HOMEPAGE_ENDPOINT = "https://www.airport.co.kr/daegu/ajaxf/frPryInfoSvc/getPryInfoList.do";
 const REFERER = "https://www.airport.co.kr/daegu/cms/frCon/index.do?MENU_ID=100";
+
 const CACHE_SECONDS = 45;
 const REQUEST_TIMEOUT_MS = 10_000;
+const INFO_REVALIDATE_SECONDS = 45;
+const OPERATION_REVALIDATE_SECONDS = 300;
+const DETAIL_REVALIDATE_SECONDS = 600;
+const DETAIL_PAGE_SIZE = 100;
+const DETAIL_LOOKBACK_MS = 3 * 60 * 60_000;
+const DETAIL_LOOKAHEAD_MS = 4 * 60 * 60_000;
+
+type GwPage = {
+  items: RawKacFlight[];
+  totalCount: number;
+};
 
 const text = (value: unknown, fallback = "") =>
   value === null || value === undefined ? fallback : String(value).trim();
@@ -22,6 +34,10 @@ function first(raw: RawKacFlight, keys: string[], fallback = "") {
     if (value) return value;
   }
   return fallback;
+}
+
+function normalizedFlightId(value: string) {
+  return value.replace(/\s+/g, "").toUpperCase();
 }
 
 function kstParts(now = new Date()) {
@@ -54,6 +70,15 @@ function hhmm(value: string) {
   return digits.padStart(4, "0");
 }
 
+function hhmmMinutes(value: string) {
+  const time = hhmm(value);
+  if (!time || time === "2400") return time === "2400" ? 1440 : Number.NaN;
+  const hours = Number(time.slice(0, 2));
+  const minutes = Number(time.slice(2, 4));
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 23 || minutes > 59) return Number.NaN;
+  return hours * 60 + minutes;
+}
+
 function fullDateTime(value: string, date: string, scheduledValue = "") {
   const digits = value.replace(/\D/g, "");
   if (digits.length >= 12) return digits.slice(0, 12);
@@ -72,6 +97,17 @@ function fullDateTime(value: string, date: string, scheduledValue = "") {
   return `${targetDate}${time}`;
 }
 
+function dateTimeEpoch(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 12) return Number.NaN;
+  const year = Number(digits.slice(0, 4));
+  const month = Number(digits.slice(4, 6));
+  const day = Number(digits.slice(6, 8));
+  const hour = Number(digits.slice(8, 10));
+  const minute = Number(digits.slice(10, 12));
+  return Date.UTC(year, month - 1, day, hour - 9, minute);
+}
+
 function normalizeType(value: string): "국내선" | "국제선" {
   const normalized = value.toLowerCase();
   return normalized.includes("국제") || normalized === "i" || normalized.includes("international")
@@ -87,7 +123,7 @@ function normalizeGwInfoFlight(raw: RawKacFlight, mode: FlightMode, index: numbe
   const departure = mode === "departures";
   const scheduleRaw = first(raw, ["std", "STD", "scheduledatetime"]);
   const estimatedRaw = first(raw, ["etd", "ETD", "estimateddatetime"], scheduleRaw);
-  const flightId = first(raw, ["airFln", "AIR_FLN", "flightid"], "-").replace(/\s+/g, "");
+  const flightId = normalizedFlightId(first(raw, ["airFln", "AIR_FLN", "flightid"], "-"));
   const remark = first(raw, ["rmkKor", "RMK_KOR"]);
   const airportCode = first(raw, ["city", "CITY"], "").toUpperCase();
 
@@ -95,7 +131,7 @@ function normalizeGwInfoFlight(raw: RawKacFlight, mode: FlightMode, index: numbe
     id: `${date}-${mode}-${flightId}-${scheduleRaw}-${index}`,
     mode,
     flightId,
-    masterFlightId: first(raw, ["masterflightid", "MASTER_FLN"]),
+    masterFlightId: normalizedFlightId(first(raw, ["masterflightid", "MASTER_FLN"])),
     airline: first(raw, ["airlineKorean", "AIRLINE_KOREAN", "airline"], "-"),
     airlineEnglish: first(raw, ["airlineEnglish", "AIRLINE_ENGLISH"]),
     airport: departure
@@ -117,11 +153,44 @@ function normalizeGwInfoFlight(raw: RawKacFlight, mode: FlightMode, index: numbe
   };
 }
 
+function normalizeGwOperationFlight(raw: RawKacFlight, mode: FlightMode, index: number, date: string): FidsFlight {
+  const departure = mode === "departures";
+  const scheduleRaw = first(raw, ["scheduledatetime", "scheduleDateTime"]);
+  const estimatedRaw = first(raw, ["estimateddatetime", "estimatedDateTime"], scheduleRaw);
+  const operationDate = first(raw, ["searchday"], date).replace(/\D/g, "").slice(0, 8) || date;
+  const flightId = normalizedFlightId(first(raw, ["flightid", "flightId"], "-"));
+  const remark = first(raw, ["rmkKor", "remark"]);
+  const airportCode = (
+    departure
+      ? first(raw, ["arrvAirportCode", "arrAirportCode"])
+      : first(raw, ["depAirportCode"])
+  ).toUpperCase();
+
+  return {
+    id: `${operationDate}-${mode}-${flightId}-${scheduleRaw}-op-${index}`,
+    mode,
+    flightId,
+    masterFlightId: normalizedFlightId(first(raw, ["masterflightid", "masterFlightId"])),
+    airline: first(raw, ["airline"], "-"),
+    airport: departure ? first(raw, ["arrAirport"], "-") : first(raw, ["depAirport"], "-"),
+    airportEnglish: departure ? first(raw, ["arrAirportEng"]) : first(raw, ["depAirportEng"]),
+    airportCode,
+    scheduleDateTime: fullDateTime(scheduleRaw, operationDate),
+    estimatedDateTime: fullDateTime(estimatedRaw, operationDate, scheduleRaw) || fullDateTime(scheduleRaw, operationDate),
+    actualDateTime: isCompleteStatus(remark) ? fullDateTime(estimatedRaw, operationDate, scheduleRaw) : "",
+    facility: "-",
+    facilityLabel: departure ? "탑승구" : "수하물",
+    flightType: normalizeType(first(raw, ["line"])),
+    remark,
+    codeshare: first(raw, ["codeshare"]),
+  };
+}
+
 function normalizeHomepageFlight(raw: RawKacFlight, mode: FlightMode, index: number, date: string): FidsFlight {
   const departure = mode === "departures";
   const scheduleRaw = first(raw, ["STD", "std"]);
   const estimatedRaw = first(raw, ["ETD", "ETD1", "etd"], scheduleRaw);
-  const flightId = first(raw, ["AIR_FLN", "airFln", "FLN", "fln"], "-").replace(/\s+/g, "");
+  const flightId = normalizedFlightId(first(raw, ["AIR_FLN", "airFln", "FLN", "fln"], "-"));
   const remark = first(raw, ["RMK_KOR", "rmkKor"]);
   const operationDate = first(raw, ["ACT_C_DATE"], date).replace(/\D/g, "").slice(0, 8) || date;
 
@@ -129,7 +198,7 @@ function normalizeHomepageFlight(raw: RawKacFlight, mode: FlightMode, index: num
     id: `${operationDate}-${mode}-${flightId}-${scheduleRaw}-${index}`,
     mode,
     flightId,
-    masterFlightId: first(raw, ["CDSR_MST_FL_NM", "masterFln"]),
+    masterFlightId: normalizedFlightId(first(raw, ["CDSR_MST_FL_NM", "masterFln"])),
     airline: first(raw, ["AIR_KOR", "airlineKorean"], "-"),
     airlineEnglish: first(raw, ["AIR_ENG", "airlineEnglish"]),
     airport: first(raw, ["ARRIVED_KOR", "VIA_KOR", "arrivedKor"], "-"),
@@ -160,11 +229,27 @@ function cleanApiKey(value: string) {
   }
 }
 
+function getApiKey() {
+  const configuredKey = process.env.KAC_API_KEY;
+  if (!configuredKey?.trim()) throw new Error("KAC_API_KEY가 설정되지 않았습니다.");
+  return cleanApiKey(configuredKey);
+}
+
 function safeUpstreamMessage(value: string, apiKey: string) {
   return value.replaceAll(apiKey, "<redacted>").replace(/\s+/g, " ").slice(0, 220);
 }
 
-function gwItems(json: any): RawKacFlight[] {
+function gwPage(json: any): GwPage {
+  const serviceError = json?.OpenAPI_ServiceResponse?.cmmMsgHeader;
+  if (serviceError) {
+    throw new Error(
+      `KAC 통합 운항 API 오류 ${text(serviceError?.returnReasonCode, "unknown")}: ${text(
+        serviceError?.returnAuthMsg ?? serviceError?.errMsg,
+        "알 수 없는 오류"
+      )}`
+    );
+  }
+
   const response = json?.response ?? json;
   const header = response?.header ?? json?.header;
   const resultCode = text(header?.resultCode);
@@ -174,28 +259,25 @@ function gwItems(json: any): RawKacFlight[] {
 
   const body = response?.body ?? json?.body ?? json;
   const value = body?.items?.item ?? body?.items ?? json?.items?.item ?? json?.items ?? [];
-  if (Array.isArray(value)) return value as RawKacFlight[];
-  return value && typeof value === "object" ? [value as RawKacFlight] : [];
+  const items = Array.isArray(value)
+    ? (value as RawKacFlight[])
+    : value && typeof value === "object"
+      ? [value as RawKacFlight]
+      : [];
+  const totalCount = Number(text(body?.totalCount, String(items.length))) || items.length;
+  return { items, totalCount };
 }
 
-async function fetchGwInfoFlights(mode: FlightMode, date: string) {
-  const configuredKey = process.env.KAC_API_KEY;
-  if (!configuredKey?.trim()) throw new Error("KAC_API_KEY가 설정되지 않았습니다.");
-
-  const apiKey = cleanApiKey(configuredKey);
-  const endpoint = new URL(`${KAC_GW_BASE}/info`);
+async function fetchGw(path: string, params: Record<string, string>, revalidate: number): Promise<GwPage> {
+  const apiKey = getApiKey();
+  const endpoint = new URL(`${KAC_GW_BASE}/${path}`);
   endpoint.searchParams.set("serviceKey", apiKey);
-  endpoint.searchParams.set("schAirCode", AIRPORT_CODE);
-  endpoint.searchParams.set("schIOType", mode === "departures" ? "O" : "I");
-  endpoint.searchParams.set("schStTime", "0000");
-  endpoint.searchParams.set("schEdTime", "2359");
-  endpoint.searchParams.set("pageNo", "1");
-  endpoint.searchParams.set("numOfRows", "100");
+  Object.entries(params).forEach(([key, value]) => endpoint.searchParams.set(key, value));
   endpoint.searchParams.set("type", "json");
 
   const response = await fetch(endpoint, {
     headers: { Accept: "application/json" },
-    cache: "no-store",
+    next: { revalidate },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const responseBody = await response.text();
@@ -211,8 +293,25 @@ async function fetchGwInfoFlights(mode: FlightMode, date: string) {
     throw new Error(`KAC 통합 운항 API가 JSON이 아닌 응답을 반환했습니다: ${safeUpstreamMessage(responseBody, apiKey)}`);
   }
 
+  return gwPage(json);
+}
+
+async function fetchGwInfoFlights(mode: FlightMode, date: string) {
   const expectedIo = mode === "departures" ? "O" : "I";
-  return gwItems(json)
+  const { items } = await fetchGw(
+    "info",
+    {
+      schAirCode: AIRPORT_CODE,
+      schIOType: expectedIo,
+      schStTime: "0000",
+      schEdTime: "2359",
+      pageNo: "1",
+      numOfRows: "100",
+    },
+    INFO_REVALIDATE_SECONDS
+  );
+
+  return items
     .filter((raw) => {
       const io = first(raw, ["io", "IO"]).toUpperCase();
       const airport = first(raw, ["airport", "AIRPORT"]).toUpperCase();
@@ -221,6 +320,235 @@ async function fetchGwInfoFlights(mode: FlightMode, date: string) {
     .map((raw, index) => normalizeGwInfoFlight(raw, mode, index, date))
     .filter((flight) => flight.flightId !== "-" && flight.scheduleDateTime)
     .sort((a, b) => sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) || a.flightId.localeCompare(b.flightId));
+}
+
+async function fetchGwOperationFlights(mode: FlightMode, date: string) {
+  const path = mode === "departures" ? "depart" : "arrival";
+  const { items } = await fetchGw(
+    path,
+    {
+      pageNo: "1",
+      numOfRows: "100",
+      searchday: date,
+      from_time: "0000",
+      to_time: "2359",
+      airport_code: AIRPORT_CODE,
+    },
+    OPERATION_REVALIDATE_SECONDS
+  );
+
+  const expectedIo = mode === "departures" ? "O" : "I";
+  return items
+    .filter((raw) => {
+      const io = first(raw, ["io"]).toUpperCase();
+      const searchDay = first(raw, ["searchday"], date).replace(/\D/g, "").slice(0, 8);
+      return (!io || io === expectedIo) && (!searchDay || searchDay === date);
+    })
+    .map((raw, index) => normalizeGwOperationFlight(raw, mode, index, date))
+    .filter((flight) => flight.flightId !== "-" && flight.scheduleDateTime)
+    .sort((a, b) => sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) || a.flightId.localeCompare(b.flightId));
+}
+
+function operationFallbackKey(flight: FidsFlight) {
+  return [
+    flight.mode,
+    normalizedFlightId(flight.flightId),
+    flight.scheduleDateTime,
+    flight.airportCode,
+  ].join("|");
+}
+
+function mergeOperationFlights(baseFlights: FidsFlight[], operationFlights: FidsFlight[]) {
+  const operationById = new Map(operationFlights.map((flight) => [normalizedFlightId(flight.flightId), flight]));
+  const merged: FidsFlight[] = baseFlights.map((flight) => {
+    const meta = operationById.get(normalizedFlightId(flight.flightId));
+    if (!meta) return flight;
+    return {
+      ...meta,
+      ...flight,
+      masterFlightId: meta.masterFlightId || flight.masterFlightId,
+      codeshare: meta.codeshare || flight.codeshare,
+      airline: flight.airline === "-" ? meta.airline : flight.airline,
+      airport: flight.airport === "-" ? meta.airport : flight.airport,
+      airportEnglish: flight.airportEnglish || meta.airportEnglish,
+      airportCode: flight.airportCode || meta.airportCode,
+      remark: flight.remark || meta.remark,
+      actualDateTime: flight.actualDateTime || meta.actualDateTime,
+      facility: flight.facility || meta.facility || "-",
+    };
+  });
+
+  const existingKeys = new Set(merged.map(operationFallbackKey));
+  operationFlights.forEach((flight) => {
+    const key = operationFallbackKey(flight);
+    if (existingKeys.has(key)) return;
+    merged.push(flight);
+    existingKeys.add(key);
+  });
+
+  const byFlightId = new Map(merged.map((flight) => [normalizedFlightId(flight.flightId), flight]));
+  const masterIds = new Set(
+    merged.map((flight) => normalizedFlightId(flight.masterFlightId)).filter(Boolean)
+  );
+
+  masterIds.forEach((masterId) => {
+    const master = byFlightId.get(masterId);
+    if (master) master.masterFlightId = masterId;
+  });
+
+  merged.forEach((flight) => {
+    const masterId = normalizedFlightId(flight.masterFlightId);
+    if (!masterId) return;
+    const master = byFlightId.get(masterId);
+    if (!master || master === flight) return;
+
+    flight.scheduleDateTime = master.scheduleDateTime || flight.scheduleDateTime;
+    flight.estimatedDateTime = master.estimatedDateTime || flight.estimatedDateTime;
+    flight.actualDateTime = master.actualDateTime || flight.actualDateTime;
+    flight.airport = master.airport || flight.airport;
+    flight.airportEnglish = master.airportEnglish || flight.airportEnglish;
+    flight.airportCode = master.airportCode || flight.airportCode;
+    flight.flightType = master.flightType;
+    flight.facility = master.facility || flight.facility;
+    flight.remark = master.remark || flight.remark;
+    flight.remarkEnglish = master.remarkEnglish || flight.remarkEnglish;
+  });
+
+  return merged.sort(
+    (a, b) =>
+      sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) ||
+      normalizedFlightId(a.masterFlightId || a.flightId).localeCompare(normalizedFlightId(b.masterFlightId || b.flightId)) ||
+      a.flightId.localeCompare(b.flightId)
+  );
+}
+
+async function fetchGwDetailPage(pageNo: number): Promise<GwPage> {
+  return fetchGw(
+    "detail",
+    {
+      pageNo: String(pageNo),
+      numOfRows: String(DETAIL_PAGE_SIZE),
+    },
+    DETAIL_REVALIDATE_SECONDS
+  );
+}
+
+function detailPageRange(items: RawKacFlight[]) {
+  const times = items
+    .map((raw) => hhmmMinutes(first(raw, ["STD", "std"])))
+    .filter(Number.isFinite);
+  if (!times.length) return null;
+  return { min: Math.min(...times), max: Math.max(...times) };
+}
+
+function detailFlightKey(date: string, mode: FlightMode, flightId: string, schedule: string) {
+  return `${date}|${mode === "departures" ? "O" : "I"}|${normalizedFlightId(flightId)}|${hhmm(schedule)}`;
+}
+
+function shouldEnrichFacility(flight: FidsFlight, now = Date.now()) {
+  if (flight.facility && flight.facility !== "-") return false;
+  const epoch = dateTimeEpoch(flight.estimatedDateTime || flight.scheduleDateTime);
+  if (!Number.isFinite(epoch)) return false;
+  return epoch >= now - DETAIL_LOOKBACK_MS && epoch <= now + DETAIL_LOOKAHEAD_MS;
+}
+
+async function fetchRelevantDetailRows(flights: FidsFlight[]) {
+  const targets = flights.filter((flight) => shouldEnrichFacility(flight));
+  if (!targets.length) return [] as RawKacFlight[];
+
+  const targetMinutes = [...new Set(
+    targets
+      .map((flight) => hhmmMinutes(flight.scheduleDateTime))
+      .filter(Number.isFinite)
+  )];
+  if (!targetMinutes.length) return [] as RawKacFlight[];
+
+  const pages = new Map<number, Promise<GwPage>>();
+  const getPage = (pageNo: number) => {
+    const safePage = Math.max(1, pageNo);
+    let promise = pages.get(safePage);
+    if (!promise) {
+      promise = fetchGwDetailPage(safePage);
+      pages.set(safePage, promise);
+    }
+    return promise;
+  };
+
+  const firstPage = await getPage(1);
+  const totalPages = Math.max(1, Math.ceil(firstPage.totalCount / DETAIL_PAGE_SIZE));
+  const candidatePages = new Set<number>();
+
+  for (const target of targetMinutes) {
+    let low = 1;
+    let high = totalPages;
+    let found = 1;
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const page = await getPage(middle);
+      const range = detailPageRange(page.items);
+      if (!range) {
+        found = middle;
+        break;
+      }
+      if (target < range.min) {
+        found = middle;
+        high = middle - 1;
+      } else if (target > range.max) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        found = middle;
+        break;
+      }
+    }
+
+    for (const pageNo of [found - 1, found, found + 1]) {
+      if (pageNo >= 1 && pageNo <= totalPages) candidatePages.add(pageNo);
+    }
+  }
+
+  const detailPages = await Promise.all([...candidatePages].map((pageNo) => getPage(pageNo)));
+  return detailPages.flatMap((page) => page.items);
+}
+
+async function enrichFacilities(flights: FidsFlight[], date: string, mode: FlightMode) {
+  const detailRows = await fetchRelevantDetailRows(flights);
+  if (!detailRows.length) return { flights, usedDetail: false };
+
+  const exact = new Map<string, RawKacFlight>();
+  const loose = new Map<string, RawKacFlight>();
+
+  detailRows.forEach((raw) => {
+    const airport = first(raw, ["AIRPORT", "airport"]).toUpperCase();
+    const flightDate = first(raw, ["FLIGHT_DATE", "flightDate"]).replace(/\D/g, "").slice(0, 8);
+    const io = first(raw, ["IO", "io"]).toUpperCase();
+    const flightId = normalizedFlightId(first(raw, ["AIR_FLN", "airFln"]));
+    const schedule = first(raw, ["STD", "std"]);
+    if (airport !== AIRPORT_CODE || flightDate !== date || !flightId) return;
+    if (io && io !== (mode === "departures" ? "O" : "I")) return;
+
+    exact.set(detailFlightKey(flightDate, mode, flightId, schedule), raw);
+    loose.set(`${flightDate}|${io || (mode === "departures" ? "O" : "I")}|${flightId}`, raw);
+  });
+
+  const enriched = flights.map((flight) => {
+    if (!shouldEnrichFacility(flight)) return flight;
+    const flightDate = flight.scheduleDateTime.slice(0, 8) || date;
+    const io = mode === "departures" ? "O" : "I";
+    const detail =
+      exact.get(detailFlightKey(flightDate, mode, flight.flightId, flight.scheduleDateTime)) ||
+      loose.get(`${flightDate}|${io}|${normalizedFlightId(flight.flightId)}`);
+    if (!detail) return flight;
+
+    const facility =
+      mode === "departures"
+        ? first(detail, ["GATE", "gate"], flight.facility)
+        : first(detail, ["BAGGAGE_CLAIM", "baggageClaim"], flight.facility);
+    return facility && facility !== flight.facility ? { ...flight, facility } : flight;
+  });
+
+  return { flights: enriched, usedDetail: true };
 }
 
 async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: string) {
@@ -276,7 +604,13 @@ async function fetchHomepageFlights(mode: FlightMode, date: string, formDate: st
     .sort((a, b) => sortEpoch(a.scheduleDateTime) - sortEpoch(b.scheduleDateTime) || a.flightId.localeCompare(b.flightId));
 }
 
-function payload(mode: FlightMode, flights: FidsFlight[], source: FlightsPayload["source"], warning?: string): FlightsPayload {
+function payload(
+  mode: FlightMode,
+  flights: FidsFlight[],
+  source: FlightsPayload["source"],
+  warning?: string,
+  dataSources?: string[]
+): FlightsPayload {
   const { date } = kstParts();
   return {
     flights,
@@ -284,11 +618,12 @@ function payload(mode: FlightMode, flights: FidsFlight[], source: FlightsPayload
     updatedAt: new Date().toISOString(),
     source,
     dataSources:
-      source === "kac_gw"
+      dataSources ??
+      (source === "kac_gw"
         ? ["kac-flight-status-info-gw"]
         : source === "kac_homepage"
           ? ["kac-daegu-homepage"]
-          : ["demo"],
+          : ["demo"]),
     query: {
       airport: AIRPORT_CODE,
       date,
@@ -309,8 +644,26 @@ export async function GET(request: NextRequest) {
   const liveErrors: string[] = [];
 
   try {
-    const flights = await fetchGwInfoFlights(mode, date);
-    return NextResponse.json(payload(mode, flights, "kac_gw"), {
+    let flights = await fetchGwInfoFlights(mode, date);
+    const dataSources = ["kac-flight-status-info-gw"];
+
+    try {
+      const operationFlights = await fetchGwOperationFlights(mode, date);
+      flights = mergeOperationFlights(flights, operationFlights);
+      dataSources.push(mode === "departures" ? "kac-flight-status-depart-gw" : "kac-flight-status-arrival-gw");
+    } catch (error) {
+      console.warn("[TAE FIDS] 코드쉐어 보강 조회 실패", error);
+    }
+
+    try {
+      const facilityResult = await enrichFacilities(flights, date, mode);
+      flights = facilityResult.flights;
+      if (facilityResult.usedDetail) dataSources.push("kac-flight-status-detail-gw");
+    } catch (error) {
+      console.warn("[TAE FIDS] 시설정보 보강 조회 실패", error);
+    }
+
+    return NextResponse.json(payload(mode, flights, "kac_gw", undefined, dataSources), {
       headers: { "Cache-Control": `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=30` },
     });
   } catch (error) {
