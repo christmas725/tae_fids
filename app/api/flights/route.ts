@@ -199,9 +199,6 @@ async function fetchGwInfoFlights(mode: FlightMode, date: string) {
   const responseBody = await response.text();
 
   if (!response.ok) {
-    if (response.status === 403) {
-      throw new Error("KAC 통합 운항 API 403: 공공데이터포털 데이터셋 15158625 활용 권한이 필요합니다.");
-    }
     throw new Error(`KAC 통합 운항 API ${response.status}: ${safeUpstreamMessage(responseBody, apiKey)}`);
   }
 
@@ -290,13 +287,17 @@ function payload(mode: FlightMode, flights: FidsFlight[], source: FlightsPayload
         : source === "kac_homepage"
           ? ["kac-daegu-homepage"]
           : ["demo"],
-    query: { airportCode: AIRPORT_CODE, airportName: "대구", searchDate: date, searchFrom: "0000", searchTo: "2359" },
+    query: {
+      airport: AIRPORT_CODE,
+      date,
+    },
     warning,
   };
 }
 
 export async function GET(request: NextRequest) {
-  const mode: FlightMode = request.nextUrl.searchParams.get("mode") === "arrivals" ? "arrivals" : "departures";
+  const modeParam = request.nextUrl.searchParams.get("mode");
+  const mode: FlightMode = modeParam === "arrivals" ? "arrivals" : "departures";
   const { date, formDate } = kstParts();
 
   if (process.env.FIDS_DEMO_MODE === "true") {
