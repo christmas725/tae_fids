@@ -13,7 +13,7 @@ import type { FidsFlight, FlightMode, FlightsPayload } from "@/lib/types";
 
 type FlightGroup = { id: string; primary: FidsFlight; variants: FidsFlight[] };
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 14;
 const MAX_PAGES = 2;
 const DATA_POLL_MS = 60_000;
 const ROTATION_MS = 4_000;
