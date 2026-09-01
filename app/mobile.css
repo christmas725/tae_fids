@@ -1,4 +1,4 @@
-/* Phone and short mobile landscape layout. Keep one complete 15-row page in view. */
+/* Phone and short mobile landscape layout. Keep one complete 14-row page in view. */
 @media (max-width: 720px) {
   html, body {
     width: 100%;
@@ -99,9 +99,14 @@
   .row-grid {
     width: 100%;
     min-width: 0;
-    grid-template-columns: minmax(45px,.76fr) minmax(58px,1fr) minmax(86px,1.55fr) minmax(40px,.62fr) minmax(54px,.92fr);
+    grid-template-columns:
+      minmax(42px,.72fr)
+      minmax(51px,.88fr)
+      minmax(72px,1.3fr)
+      minmax(34px,.55fr)
+      minmax(33px,.54fr)
+      minmax(48px,.82fr);
   }
-  .row-grid > div:nth-child(4) { display: none; }
   .table-head { height: 42px; min-height: 42px; }
   .table-head > div, .flight-row > div { padding-left: 4px; padding-right: 4px; }
   .table-head b { overflow: hidden; text-overflow: ellipsis; font-size: clamp(8px,2.7vw,10px); }
@@ -117,6 +122,15 @@
   .flight-cell > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: clamp(10px,3.1vw,13px); }
   .destination-cell strong { font-size: clamp(10px,3.1vw,13px); }
   .destination-cell span { margin-top: 1px; font-size: 7px; }
+  .type-cell { padding-left: 2px !important; padding-right: 2px !important; }
+  .type-cell span {
+    width: 100%;
+    min-width: 0;
+    padding: 2px 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: clamp(7px,2.15vw,9px);
+  }
   .facility-cell strong { font-size: clamp(13px,3.8vw,17px); }
   .status-cell { padding-left: 2px !important; padding-right: 2px !important; }
   .status-cell strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(8px,2.45vw,10px); }
