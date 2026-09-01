@@ -3,57 +3,22 @@ if (!raw) process.exit(0);
 let key = raw;
 try { key = decodeURIComponent(raw); } catch {}
 
-const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-const read = (type) => parts.find((part) => part.type === type)?.value ?? "";
-const date = `${read("year")}${read("month")}${read("day")}`;
-const formDate = `${read("year")}-${read("month")}-${read("day")}`;
-
-function parse(json) {
-  const root = json?.response ?? json;
-  const body = root?.body ?? json?.body ?? {};
-  const value = body?.items?.item ?? body?.items ?? [];
-  return { root, body, items: Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [] };
-}
-
-for (const rows of [200, 500, 1000]) {
+async function page(n) {
   const url = new URL("https://apis.data.go.kr/B551178/flight-status/detail");
   url.searchParams.set("serviceKey", key);
-  url.searchParams.set("pageNo", "1");
-  url.searchParams.set("numOfRows", String(rows));
+  url.searchParams.set("pageNo", String(n));
+  url.searchParams.set("numOfRows", "100");
   url.searchParams.set("type", "json");
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  const text = await response.text();
-  let json;
-  try { json = JSON.parse(text); } catch { console.log(`[detail rows=${rows}] non-json`); continue; }
-  const result = parse(json);
-  console.log(`[detail rows=${rows}] status=${response.status} code=${result.root?.header?.resultCode ?? ""} total=${result.body?.totalCount ?? ""} returned=${result.items.length} top=${Object.keys(json || {}).join(",")}`);
-  if (!result.items.length) console.log(`[detail rows=${rows}] body=${text.replace(/\s+/g, " ").slice(0, 700)}`);
-  const taeToday = result.items.filter((item) => String(item?.AIRPORT ?? "").toUpperCase() === "TAE" && String(item?.FLIGHT_DATE ?? "") === date);
-  console.log(`[detail rows=${rows}] TAE today=${taeToday.length} gate=${taeToday.filter((x)=>x?.GATE).length} baggage=${taeToday.filter((x)=>x?.BAGGAGE_CLAIM).length}`);
+  const r = await fetch(url, { headers: { Accept: "application/json" } });
+  const j = await r.json();
+  const root = j?.response ?? j;
+  const body = root?.body ?? {};
+  const v = body?.items?.item ?? [];
+  const items = Array.isArray(v) ? v : v ? [v] : [];
+  const stds = items.map((x)=>String(x?.STD ?? "")).filter(Boolean);
+  const dates = [...new Set(items.map((x)=>String(x?.FLIGHT_DATE ?? "")).filter(Boolean))];
+  const tae = items.filter((x)=>String(x?.AIRPORT ?? "").toUpperCase()==="TAE");
+  console.log(`[detail page ${n}] count=${items.length} minSTD=${stds[0] ?? ""} maxSTD=${stds.at(-1) ?? ""} dates=${dates.join(",")} TAE=${tae.length} TAErows=${JSON.stringify(tae.map(x=>({f:x.AIR_FLN,d:x.FLIGHT_DATE,io:x.IO,std:x.STD,g:x.GATE,b:x.BAGGAGE_CLAIM}))).slice(0,4000)}`);
 }
 
-const hpBody = new URLSearchParams({
-  pInoutGbn: "I", pAirport: "TAE", pGbn: "", pActDate: formDate,
-  pSthourMin: "00:00", pEnhourMin: "23:59", pCity: "", pAirline: "", pAirlinenum: "", p0: ""
-});
-const hp = await fetch("https://www.airport.co.kr/daegu/ajaxf/frPryInfoSvc/getPryInfoList.do", {
-  method: "POST",
-  headers: {
-    Accept: "application/json",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    Origin: "https://www.airport.co.kr",
-    Referer: "https://www.airport.co.kr/daegu/cms/frCon/index.do?MENU_ID=100",
-    "User-Agent": "Mozilla/5.0",
-    "X-Requested-With": "XMLHttpRequest"
-  },
-  body: hpBody
-});
-const hpText = await hp.text();
-console.log(`[homepage arrival] status=${hp.status} prefix=${hpText.replace(/\s+/g," ").slice(0,500)}`);
-try {
-  const hpJson = JSON.parse(hpText);
-  const list = Array.isArray(hpJson?.data?.list) ? hpJson.data.list : [];
-  const keys = [...new Set(list.flatMap((x)=>Object.keys(x||{})))].sort();
-  console.log(`[homepage arrival] count=${list.length} keys=${keys.join(",")}`);
-  console.log(`[homepage arrival] samples=${JSON.stringify(list.slice(0,5)).slice(0,6000)}`);
-} catch {}
+for (const n of [1,5,10,15,20,25,30,35,40,45]) await page(n);
